@@ -24,7 +24,7 @@ from nasr_download.utils.chunk_tools import chunk
 
 class CIKGet(HeaderTools):
     def __init__(self, sqlite_path='/Users/sn0wfree/PycharmProjects/nasr_download/file/edgarticker.sqlite'):
-        self.tasks = self.load_sqlite(sqlite_path)
+        # self.tasks = self.load_sqlite(sqlite_path)
         self._get_10_tasks = self.load_ticker_mysql()
         pass
 
@@ -90,7 +90,7 @@ class CIKGet(HeaderTools):
             else:
                 cik = cls.translate_ticker_resp_2_cik(resp)
                 if cik is None:
-                    pass
+                    yield ticker, urls, cik
                 else:
                     yield ticker, urls, cik
 
@@ -150,19 +150,25 @@ class Getfillings(CIKGet):
         # tasks = [(ticker, ticker_url, cik, cls.get_url_from_cik(cik)) for ticker, ticker_url, cik in
         #          ]
         for ticker, ticker_url, cik in cls.whole_parse(ticker_urls):
-            print(f'got cik:{cik}')
-            cik_url_list = cls.get_url_from_cik(cik)
-            print(f'got cik_url:{cik_url_list[0]}')
-            for u, resp in cls.parse_urls(cik_url_list):
-                df2, link_df, df_holder = cls.parser_cik_url(resp)
-                print(df2)
-                if df2 is not None:
-                    print(f'got cik:{cik} info')
-                    df2['ticker'] = ticker
-                    df2['ticker_url'] = ticker_url
-                    df2['cik'] = cik
-                    df2['cik_url'] = u
-                    yield df2.rename(columns={'Filing Date': 'Filing_Date', 'File/Film Number': 'File_Film_Number'})
+            if cik is None:
+                print(f'ticker:{ticker} got nothing!')
+                sql = f"INSERT INTO `error_ticker` (`ticker`) VALUES ('{ticker}')"
+                Source.NASR.Excutesql(sql)
+
+            else:
+                print(f'got cik:{cik}')
+                cik_url_list = cls.get_url_from_cik(cik)
+                print(f'got cik_url:{cik_url_list[0]}')
+                for u, resp in cls.parse_urls(cik_url_list):
+                    df2, link_df, df_holder = cls.parser_cik_url(resp)
+                    print(df2)
+                    if not df2.empty:
+                        print(f'got cik:{cik} info')
+                        df2['ticker'] = ticker
+                        df2['ticker_url'] = ticker_url
+                        df2['cik'] = cik
+                        df2['cik_url'] = u
+                        yield df2.rename(columns={'Filing Date': 'Filing_Date', 'File/Film Number': 'File_Film_Number'})
 
     @staticmethod
     def store_final_url(df2, db, table):
@@ -171,7 +177,8 @@ class Getfillings(CIKGet):
     @classmethod
     def _main_process(cls, ticker_list, db='NASR', table='nasr_fund_filing_info'):
         try:
-            c = pd.concat(Getfillings.get_final_urls(ticker_list))
+            res = list(Getfillings.get_final_urls(ticker_list))
+            c = pd.concat(res)
             cls.store_final_url(c, db, table)
         except Exception as e:
             print(str(e))
@@ -183,7 +190,7 @@ class Getfillings(CIKGet):
             tasks_list = self.load_ticker_mysql()
             print(tasks_list)
             if len(tasks_list) != 0:
-                for tasks in chunk(tasks_list, 3):
+                for tasks in chunk(tasks_list, 2):
                     print('run: {}'.format(','.join(tasks)))
                     self._main_process(tasks, db=db, table=table)
                     print('run: {} done!'.format(','.join(tasks)))

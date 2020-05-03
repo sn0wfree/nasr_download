@@ -3,7 +3,7 @@ FROM python:3.7.6-slim-stretch
 RUN mkdir /app
 COPY . /app
 
-WORKDIR /app
+
 
 # RUN cd /code && sed -i s/deb.debian.org/mirrors.aliyun.com/g /etc/apt/sources.list \
 #     && apt-get clean && apt-get update \
@@ -11,7 +11,8 @@ WORKDIR /app
 #     && rm -rf /var/lib/apt/lists/* \
 #     && pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com \
 #     && apt-get purge -y --auto-remove gcc
-RUN cd /app && pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com
+RUN pip install -r requirements.txt -i http://pypi.douban.com/simple --trusted-host pypi.douban.com && cd /app
+WORKDIR /app
 
 # ENTRYPOINT python main.py $0 $@
 
