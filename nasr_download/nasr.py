@@ -84,8 +84,15 @@ class CIKGet(HeaderTools):
     @classmethod
     def whole_parse(cls, ticker_urls):
         for ticker, urls, resp in cls.batch_get(ticker_urls):
-            cik = cls.translate_ticker_resp_2_cik(resp)
-            yield ticker, urls, cik
+            if resp is None:
+                print(f'error: {ticker}')
+                pass
+            else:
+                cik = cls.translate_ticker_resp_2_cik(resp)
+                if cik is None:
+                    pass
+                else:
+                    yield ticker, urls, cik
 
     @classmethod
     def translate_ticker_resp_2_cik(cls, resp, xpath="/html/body/div/table/tr[@valign='top']/*/a"):

@@ -1,6 +1,4 @@
 # coding=utf-8
-import pandas as pd
-import numpy as np
 def chunk(df, n):
     if hasattr(df, '__len__'):
         pass
@@ -9,7 +7,7 @@ def chunk(df, n):
     length = len(df)
     for i in range(0, length, n):
         yield df[i:i + n]
+
+
 if __name__ == '__main__':
     pass
-
-
