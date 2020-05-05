@@ -3,9 +3,12 @@
 import os
 import sqlite3
 import time
+import uuid
 
+import numpy as np
 import pandas as pd
-
+from functools import lru_cache
+import data
 from nasr_download.header import HeaderTools
 from nasr_download.source import Source
 from nasr_download.utils.chunk_tools import chunk
@@ -158,7 +161,10 @@ class Getfillings(CIKGet):
             else:
                 print(f'got cik:{cik}')
                 cik_url_list = cls.get_url_from_cik(cik)
-                print(f'got cik_url:{cik_url_list[0]}')
+                if isinstance(cik_url_list, list):
+                    print(f'got cik_url:{cik_url_list[0]}')
+                else:
+                    print(f'got cik_url:{cik_url_list}')
                 for u, resp in cls.parse_urls(cik_url_list):
                     df2, link_df, df_holder = cls.parser_cik_url(resp)
                     print(df2)
@@ -190,7 +196,7 @@ class Getfillings(CIKGet):
             tasks_list = self.load_ticker_mysql()
             print(tasks_list)
             if len(tasks_list) != 0:
-                for tasks in chunk(tasks_list, 2):
+                for tasks in chunk(tasks_list, 1):
                     print('run: {}'.format(','.join(tasks)))
                     self._main_process(tasks, db=db, table=table)
                     print('run: {} done!'.format(','.join(tasks)))
@@ -207,6 +213,88 @@ class Getfillings(CIKGet):
 
 # update_sql = f"UPDATE {db}.{table} SET status = 1 WHERE href = '{rest}' and status = 0 "
 
+
+class DownloadTxt(HeaderTools):
+    def __init__(self):
+
+        pass
+
+    @staticmethod
+    @lru_cache(maxsize=100)
+    def pool(a):
+        sql = 'select distinct self_id from `txt_tasks` '
+        self_id_df = Source.NASR.sql2data(sql)
+        if self_id_df.empty:
+            return None
+        else:
+            return self_id_df['self_id'].values.tolist()
+
+    @classmethod
+    def get_one_task(cls, count_num=10):
+        a = pd.datetime.now().strftime("%m")
+        rand_num_list = np.random.choice(cls.pool(a), size=count_num)
+        rand_num_str = ','.join(map(lambda x: str(x), rand_num_list))
+
+        sql = f"SELECT * FROM `txt_tasks` where self_id in ({rand_num_str}) "
+        return Source.NASR.sql2data(sql)
+
+    @staticmethod
+    def generate_tasks(tasks_df):
+        for item_info in tasks_df.to_dict('records'):
+            full_link = item_info['full_link']
+            cik = item_info['cik']
+            File_Film_Number = item_info['File_Film_Number']
+            hash_link_code = item_info['hash_link_code']
+            SECAccessionNo = item_info['SECAccessionNo']
+            ticker = item_info['ticker']
+            respond_txt_url = full_link.split(SECAccessionNo)[0] + SECAccessionNo + '.txt'
+
+            yield respond_txt_url, ticker, cik, SECAccessionNo, hash_link_code
+
+    @classmethod
+    def parser_tasks(cls, tasks, store_path):
+        print(tasks)
+        respond_txt_url_list, ticker_list, cik_list, SECAccessionNo_list, hash_link_code_list = zip(*tasks)
+        finder_code = dict(zip(respond_txt_url_list, hash_link_code_list))
+        finder_ticker = dict(zip(respond_txt_url_list, ticker_list))
+        finder_cik = dict(zip(respond_txt_url_list, cik_list))
+        finder_SECAccessionNo = dict(zip(respond_txt_url_list, SECAccessionNo_list))
+
+        # for url_list in chunk(respond_txt_url_list, 10):
+        # for respond_txt_url, ticker, cik, SECAccessionNo, hash_link_code in tasks:
+
+        for url, resp in cls.get_urls(respond_txt_url_list):
+            hashed_name = uuid.uuid5(uuid.NAMESPACE_DNS, url).hex + f'_{finder_SECAccessionNo[url]}.txt'
+            yield finder_code[url], finder_ticker[url], finder_cik[url], url, hashed_name
+            cls.save(store_path + '/' + hashed_name, resp.content)
+
+    @classmethod
+    def run_tasks(cls, tasks=None, store_path=None, db_table='NASR.txt_getting_status.csv', count_num=10):
+        if store_path is None:
+            store_path = data.__path__[0]
+        print(store_path)
+        if tasks is None:
+            tasks = cls.get_one_task(count_num=count_num)
+        tasks = cls.generate_tasks(tasks)
+        for hash_link_code, ticker, cik, url, hashed_name in cls.parser_tasks(tasks, store_path):
+            print(f'{url} done!')
+            insert_sql = f"INSERT ignore INTO {db_table} (`ticker`, `cik`, `hash_link_code`, `store_name`)  VALUES('{ticker}', '{cik}', '{hash_link_code}', '{hashed_name}')"
+            # where_clause1 = f"ticker = '{ticker}' and cik = '{cik}' and hash_link_code = '{hash_link_code}'"
+            # update_sql = f"UPDATE {db_table} SET status = 1 WHERE {where_clause1} and status = 0 "
+            Source.NASR.Excutesql(insert_sql)
+        time.sleep(1)
+
+    @staticmethod
+    def save(name: str, content):
+        with open(name, 'wb+') as f:
+            f.write(content)
+
+            # resp = DT.get_url(respond_txt)
+            # content = resp.content
+            #
+            # print(1)
+
+
 if __name__ == '__main__':
     url1 = 'https://www.sec.gov/cgi-bin/series?ticker=FCAKX&CIK=&sc=companyseries&type=N-PX&Find=Search'
     url2 = 'https://www.sec.gov/cgi-bin/series?ticker=FEIKX&CIK=&sc=companyseries&type=N-PX&Find=Search'
@@ -215,7 +303,20 @@ if __name__ == '__main__':
 
     # for u, resp in CIKGet.parse_urls(url3):
     #     #     df2, link_df, df_holder = Getfillings.parser_cik_url(resp)
-    GF = Getfillings()
+    DT = DownloadTxt()
+    DT.run_tasks(count_num=2)
+
+    # sdf = res[0]
+    # full_link = sdf['full_link'][0]
+    # cik = sdf['cik'][0]
+    # File_Film_Number = sdf['File_Film_Number'][0]
+    # SECAccessionNo = sdf['SECAccessionNo'][0]
+    # ticker = sdf['ticker'][0]
+    # respond_txt = full_link.split(SECAccessionNo)[0] + SECAccessionNo + '.txt'
+    # resp = DT.get_url(respond_txt)
+    # content = resp.content
+    # with open('text', 'wb+') as f:
+    #     f.write(content)
 
     # def load_ticker(path='/Users/sn0wfree/PycharmProjects/nasr_download/file/edgarticker.csv', dtype='csv'):
     #     return pd.read_csv(path)
@@ -223,7 +324,7 @@ if __name__ == '__main__':
     # df = load_ticker()
     # Getfillings.store_final_url(df, 'NASR', 'ticker')
 
-    GF.run(db='NASR', table='nasr_fund_filing_info')
+    # GF.run(db='NASR', table='nasr_fund_filing_info')
     # for tasks in chunk(GF.tasks, 4):
     #     print('run: {}'.format(','.join(tasks)))
     #     Getfillings.main_process(tasks)
